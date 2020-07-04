@@ -13,9 +13,10 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Type, Dict, Union, Tuple, NamedTuple, List
+from typing import Type, Dict, Union, Tuple, NamedTuple, List, Optional, Callable, Any
 import packaging.version
 import asyncio
+import operator as op
 
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from mautrix.types import TextMessageEventContent, MessageType, Format, EventID, RoomID, UserID
@@ -75,8 +76,8 @@ class ServerInfo(NamedTuple):
 
     @classmethod
     def parse(cls, software: str, version: str) -> 'ServerInfo':
-        if software == "Synapse":
-            return ServerInfo(software=software,
+        if software.lower() == "synapse":
+            return ServerInfo(software="Synapse",
                               version=packaging.version.parse(version.split(" ")[0]))
         else:
             return ServerInfo(software=software, version=version)
@@ -109,6 +110,26 @@ def _pluralize(val: int, word: str) -> str:
         return f"{val} {word}"
     else:
         return f"{val} {word}s"
+
+
+ComparisonOperator = Callable[[Any, Any], bool]
+
+op_map: Dict[str, ComparisonOperator] = {
+    "=": op.eq,
+    "==": op.eq,
+    "===": op.eq,
+    ">": op.gt,
+    ">=": op.ge,
+    "<": op.lt,
+    "<=": op.le,
+    "!=": op.ne,
+    "!==": op.ne,
+    "≠": op.ne,
+}
+
+
+def parse_operator(val: str) -> ComparisonOperator:
+    return op_map.get(val)
 
 
 class ServerCheckerBot(Plugin):
@@ -200,17 +221,22 @@ class ServerCheckerBot(Plugin):
 
     @servers.subcommand("match", help="Show which servers are on a specific version")
     @command.argument("software", required=True)
+    @command.argument("operator", required=False, parser=parse_operator)
     @command.argument("version", required=True, pass_raw=True)
-    async def match(self, evt: MessageEvent, software: str, version: str) -> None:
+    async def match(self, evt: MessageEvent, software: str, operator: Optional[ComparisonOperator],
+                    version: str) -> None:
         try:
             servers = self.caches[evt.room_id].servers
         except KeyError:
             await evt.reply("No results cached. Use `!servers` to test servers first.")
             return
+        if not operator:
+            operator = op.eq
         want_info = ServerInfo.parse(software, version)
         matches = []
         for server_name, (info, users) in servers.items():
-            if info == want_info:
+            if ((info.software.lower() == want_info.software.lower()
+                 and operator(info.version, want_info.version))):
                 if len(users) == 1:
                     user_list = f"[{users[0]}](https://matrix.to/#/{users[0]})"
                 elif len(users) == 2:
