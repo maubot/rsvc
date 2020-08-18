@@ -234,17 +234,21 @@ class ServerCheckerBot(Plugin):
             operator = op.eq
         want_info = ServerInfo.parse(software, version)
         matches = []
+
+        def antinotify(text: str) -> str:
+            return "\ufeff".join(text)
+
         for server_name, (info, users) in servers.items():
             if ((info.software.lower() == want_info.software.lower()
                  and operator(info.version, want_info.version))):
                 if len(users) == 1:
-                    user_list = f"[{users[0]}](https://matrix.to/#/{users[0]})"
+                    user_list = f"[{antinotify(users[0])}](https://matrix.to/#/{users[0]})"
                 elif len(users) == 2:
-                    user_list = (f"[{users[0]}](https://matrix.to/#/{users[0]}) and "
-                                 f"[{users[1]}](https://matrix.to/#/{users[1]})")
+                    user_list = (f"[{antinotify(users[0])}](https://matrix.to/#/{users[0]}) and "
+                                 f"[{antinotify(users[1])}](https://matrix.to/#/{users[1]})")
                 else:
-                    user_list = (f"[{users[0]}](https://matrix.to/#/{users[0]}), "
-                                 f"[{users[1]}](https://matrix.to/#/{users[1]}) and "
+                    user_list = (f"[{antinotify(users[0])}](https://matrix.to/#/{users[0]}), "
+                                 f"[{antinotify(users[1])}](https://matrix.to/#/{users[1]}) and "
                                  f"{len(users) - 2} others")
                 matches.append(f"* {server_name} with {user_list}")
         if not matches:
