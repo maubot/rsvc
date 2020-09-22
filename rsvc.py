@@ -13,10 +13,13 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Type, Dict, Union, Tuple, NamedTuple, List, Optional, Callable, Any
-import packaging.version
+from typing import Type, Dict, Union, Tuple, NamedTuple, List, Optional, Callable, Any, Set
 import asyncio
 import operator as op
+
+from attr import dataclass
+import packaging.version
+import attr
 
 from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 from mautrix.types import TextMessageEventContent, MessageType, Format, EventID, RoomID, UserID
@@ -64,6 +67,7 @@ minimum_version = {
 server_order: Dict[str, int] = {
     "Synapse": 100,
     "construct": 50,
+    "Conduit": 40,
     "Dendrite": 10,
 }
 
@@ -101,8 +105,13 @@ class ServerInfo(NamedTuple):
             return server_order.get(self.software, 0) < server_order.get(other.software, 0)
 
 
-Results = NamedTuple('Results', versions=Dict[ServerInfo, Tuple[int, List[UserID]]],
-                     servers=Dict[str, Tuple[ServerInfo, List[UserID]]], errors=Dict[str, str])
+@dataclass
+class Results:
+    servers: Dict[str, List[UserID]]
+    versions: Dict[str, ServerInfo]
+    errors: Dict[str, str]
+    event_id: Optional[EventID] = None
+    lock: asyncio.Lock = attr.ib(factory=lambda: asyncio.Lock())
 
 
 def _pluralize(val: int, word: str) -> str:
@@ -134,6 +143,7 @@ def parse_operator(val: str) -> ComparisonOperator:
 
 class ServerCheckerBot(Plugin):
     caches: Dict[RoomID, Results] = {}
+    tests_in_progress: Set[RoomID] = set()
 
     async def start(self) -> None:
         self.on_external_config_update()
@@ -177,16 +187,12 @@ class ServerCheckerBot(Plugin):
         return servers
 
     async def _test_all(self, servers: Dict[str, List[UserID]]) -> Results:
-        by_version: Dict[ServerInfo, Tuple[int, List[UserID]]] = {}
-        server_versions: Dict[str, Tuple[ServerInfo, List[UserID]]] = {}
+        versions: Dict[str, ServerInfo] = {}
         errors: Dict[str, str] = {}
 
-        async def _test(server_name: str, users: List[UserID]) -> None:
+        async def _test(server_name: str) -> None:
             try:
-                result: ServerInfo = await asyncio.wait_for(self._test(server_name), timeout=60)
-                existing_server_count, existing_users = by_version.get(result, (0, []))
-                by_version[result] = (existing_server_count + 1, existing_users + users)
-                server_versions[server_name] = (result, users)
+                versions[server_name] = await asyncio.wait_for(self._test(server_name), timeout=60)
             except TestError as e:
                 errors[server_name] = str(e)
             except asyncio.TimeoutError:
@@ -194,12 +200,47 @@ class ServerCheckerBot(Plugin):
             except Exception:
                 errors[server_name] = "internal plugin error"
 
-        await asyncio.gather(*[_test(server, users) for server, users in servers.items()])
+        await asyncio.gather(*[_test(server) for server in servers.keys()])
 
-        return Results(dict(sorted(by_version.items(), reverse=True)), server_versions, errors)
+        return Results(servers, versions, errors)
 
-    @command.new("servers", require_subcommand=False)
+    @staticmethod
+    def _aggregate_versions(results: Results) -> Dict[ServerInfo, Tuple[int, List[UserID]]]:
+        by_version: Dict[ServerInfo, Tuple[int, List[UserID]]] = {}
+        for server_name, info in results.versions.items():
+            users = results.servers[server_name]
+            existing_server_count, existing_users = by_version.get(info, (0, []))
+            by_version[info] = (existing_server_count + 1, existing_users + users)
+        return dict(sorted(by_version.items(), reverse=True))
+
+    @classmethod
+    def _format_results(cls, results: Results) -> str:
+        def members(server_name: str) -> str:
+            return _pluralize(len(results.servers[server_name]), "member")
+
+        versions_str = ("### Versions\n\n"
+                        + "\n".join(f"* {_pluralize(server_count, 'server')} "
+                                    f"with {_pluralize(len(users), 'member')} on {info}"
+                                    for info, (server_count, users)
+                                    in cls._aggregate_versions(results).items()))
+        errors_str = ("### Errors\n\n"
+                      + "\n".join(f"* {server} ({members(server)}): {error}"
+                                  for server, error in results.errors.items())
+                      ) if results.errors else ""
+        return "\n\n".join((versions_str, errors_str))
+
+    @command.new("servers", aliases=["versions", "server", "version"], require_subcommand=False)
     async def servers(self, evt: MessageEvent) -> None:
+        if evt.room_id in self.tests_in_progress:
+            await evt.reply("There is already a test in progress.")
+            return
+        self.tests_in_progress.add(evt.room_id)
+        try:
+            await self._servers(evt)
+        finally:
+            self.tests_in_progress.remove(evt.room_id)
+
+    async def _servers(self, evt: MessageEvent) -> None:
         event_id = await evt.reply("Loading member list...")
         servers = await self._load_members(evt.room_id)
         user_count = sum(len(users) for users in servers.values())
@@ -207,17 +248,67 @@ class ServerCheckerBot(Plugin):
                          f"Member list loaded, found {_pluralize(user_count, 'member')} "
                          f"on {_pluralize(len(servers), 'server')}. Now running federation tests")
         results = await self._test_all(servers)
+        results.event_id = event_id
         self.caches[evt.room_id] = results
-        by_version, _, errors = results
-        versions = ("### Versions\n\n"
-                    + "\n".join(f"* {_pluralize(server_count, 'server')} "
-                                f"with {_pluralize(len(users), 'member')} on {info}"
-                                for info, (server_count, users) in by_version.items()))
-        errors = ("### Errors\n\n"
-                  + "\n".join(f"* {server} ({_pluralize(len(servers[server]), 'member')}): {error}"
-                              for server, error in errors.items())
-                  ) if errors else ""
-        await self._edit(evt.room_id, event_id, "\n\n".join((versions, errors)))
+        await self._edit(evt.room_id, event_id, self._format_results(results))
+
+    @servers.subcommand("retest")
+    @command.argument("server", required=True)
+    async def retest(self, evt: MessageEvent, server: str) -> None:
+        try:
+            cache = self.caches[evt.room_id]
+        except KeyError:
+            await evt.reply("No cached results. Please use `!servers` to test "
+                            "all servers in the room first.")
+            return
+        if server not in cache.servers:
+            await evt.reply("That server isn't in the previous results. If the server joined "
+                            "recently, you must retest the whole room.")
+        try:
+            prev_version = cache.versions.pop(server)
+            prev_error = None
+        except KeyError:
+            try:
+                prev_error = cache.errors.pop(server)
+                prev_version = None
+            except KeyError:
+                await evt.reply("That server seems to be in the progress of being retested.")
+                return
+
+        event_id = await evt.reply(f"Re-testing {server}...")
+        new_version: Optional[ServerInfo] = None
+        new_error: Optional[str] = None
+
+        try:
+            cache.versions[server] = new_version = await asyncio.wait_for(
+                self._test(server), timeout=60)
+        except TestError as e:
+            cache.errors[server] = new_error = str(e)
+        except asyncio.TimeoutError:
+            cache.errors[server] = new_error = "test timed out"
+        except Exception:
+            cache.errors[server] = new_error = "internal plugin error"
+
+        if new_error != prev_error or new_version != prev_version:
+            async with cache.lock:
+                await self._edit(evt.room_id, cache.event_id, self._format_results(cache))
+
+        if new_error is not None:
+            cmd_reply_edit = f"Testing {server} failed: {new_error}"
+        elif prev_version is not None:
+            if prev_version == new_version:
+                cmd_reply_edit = f"{server} is still on {prev_version}"
+            else:
+                if prev_version.software == new_version.software:
+                    action = "update" if prev_version < new_version else "downgrade"
+                    cmd_reply_edit = (f"{server} {action}d {prev_version.software} "
+                                      f"from {prev_version.version} to {new_version.version}")
+                else:
+                    cmd_reply_edit = f"{server} switched from {prev_version} to {new_version}"
+        else:
+            cmd_reply_edit = f"{server} is back up and on version {new_version}"
+
+        await self._edit(evt.room_id, event_id, cmd_reply_edit)
 
     @servers.subcommand("match", help="Show which servers are on a specific version")
     @command.argument("software", required=True)
@@ -226,7 +317,7 @@ class ServerCheckerBot(Plugin):
     async def match(self, evt: MessageEvent, software: str, operator: Optional[ComparisonOperator],
                     version: str) -> None:
         try:
-            servers = self.caches[evt.room_id].servers
+            cache = self.caches[evt.room_id]
         except KeyError:
             await evt.reply("No results cached. Use `!servers` to test servers first.")
             return
@@ -238,9 +329,10 @@ class ServerCheckerBot(Plugin):
         def antinotify(text: str) -> str:
             return "\ufeff".join(text)
 
-        for server_name, (info, users) in servers.items():
+        for server_name, info in cache.versions.items():
             if ((info.software.lower() == want_info.software.lower()
                  and operator(info.version, want_info.version))):
+                users = cache.servers[server_name]
                 if len(users) == 1:
                     user_list = f"[{antinotify(users[0])}](https://matrix.to/#/{users[0]})"
                 elif len(users) == 2:
