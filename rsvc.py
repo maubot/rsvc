@@ -229,7 +229,8 @@ class ServerCheckerBot(Plugin):
                       ) if results.errors else ""
         return "\n\n".join((versions_str, errors_str))
 
-    @command.new("servers", aliases=["versions", "server", "version"], require_subcommand=False)
+    @command.new("servers", aliases=["versions", "server", "version"], require_subcommand=False,
+                 help="Check the version of all servers in the room.")
     async def servers(self, evt: MessageEvent) -> None:
         if evt.room_id in self.tests_in_progress:
             await evt.reply("There is already a test in progress.")
@@ -252,7 +253,8 @@ class ServerCheckerBot(Plugin):
         self.caches[evt.room_id] = results
         await self._edit(evt.room_id, event_id, self._format_results(results))
 
-    @servers.subcommand("retest")
+    @servers.subcommand("retest", aliases=["recheck"],
+                        help="Re-test one server in the previous results.")
     @command.argument("server", required=True)
     async def retest(self, evt: MessageEvent, server: str) -> None:
         try:
