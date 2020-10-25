@@ -152,11 +152,6 @@ class ServerCheckerBot(Plugin):
     def get_config_class(cls) -> Type[Config]:
         return Config
 
-    @command.new("server")
-    @command.argument("server", required=True)
-    async def server(self, evt: MessageEvent, server: str) -> None:
-        pass
-
     async def _edit(self, room_id: RoomID, event_id: EventID, text: str) -> None:
         content = TextMessageEventContent(msgtype=MessageType.NOTICE, body=text, format=Format.HTML,
                                           formatted_body=markdown.render(text))
@@ -252,6 +247,23 @@ class ServerCheckerBot(Plugin):
         results.event_id = event_id
         self.caches[evt.room_id] = results
         await self._edit(evt.room_id, event_id, self._format_results(results))
+
+    @servers.subcommand("test", aliases=["check", "version"],
+                        help="Test one server, independently of any previous whole-room tests")
+    @command.argument("server", required=True)
+    async def test(self, evt: MessageEvent, server: str) -> None:
+        await evt.mark_read()
+
+        try:
+            version = await asyncio.wait_for(self._test(server), timeout=60)
+        except TestError as e:
+            await evt.reply(f"Testing {server} failed: {e}")
+        except asyncio.TimeoutError:
+            await evt.reply(f"Testing {server} failed: test timed out")
+        except Exception:
+            await evt.reply(f"Testing {server} failed: internal plugin error")
+        else:
+            await evt.reply(f"{server} is on {version}")
 
     @servers.subcommand("retest", aliases=["recheck"],
                         help="Re-test one server in the previous results.")
