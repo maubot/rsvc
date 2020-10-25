@@ -225,7 +225,7 @@ class ServerCheckerBot(Plugin):
         return "\n\n".join((versions_str, errors_str))
 
     @command.new("servers", aliases=["versions", "server", "version"], require_subcommand=False,
-                 help="Check the version of all servers in the room.")
+                 help="Check the version of all servers in the room.", arg_fallthrough=False)
     async def servers(self, evt: MessageEvent) -> None:
         if evt.room_id in self.tests_in_progress:
             await evt.reply("There is already a test in progress.")
@@ -249,7 +249,7 @@ class ServerCheckerBot(Plugin):
         await self._edit(evt.room_id, event_id, self._format_results(results))
 
     @servers.subcommand("test", aliases=["check", "version"],
-                        help="Test one server, independently of any previous whole-room tests")
+                        help="Test one server, independently of any previous whole-room tests.")
     @command.argument("server", required=True)
     async def test(self, evt: MessageEvent, server: str) -> None:
         await evt.mark_read()
@@ -324,7 +324,8 @@ class ServerCheckerBot(Plugin):
 
         await self._edit(evt.room_id, event_id, cmd_reply_edit)
 
-    @servers.subcommand("match", help="Show which servers are on a specific version")
+    @servers.subcommand("match", help="Show which servers are on a specific version. "
+                                      "Operator can be `>`, `<`, `>=`, `<=`, `!=`, `=` or empty.")
     @command.argument("software", required=True)
     @command.argument("operator", required=False, parser=parse_operator)
     @command.argument("version", required=True, pass_raw=True)
