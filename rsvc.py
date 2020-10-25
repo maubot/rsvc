@@ -250,7 +250,7 @@ class ServerCheckerBot(Plugin):
 
     @servers.subcommand("test", aliases=["check", "version"],
                         help="Test one server, independently of any previous whole-room tests.")
-    @command.argument("server", required=True)
+    @command.argument("server", matches=".+", required=True)
     async def test(self, evt: MessageEvent, server: str) -> None:
         await evt.mark_read()
 
@@ -267,7 +267,7 @@ class ServerCheckerBot(Plugin):
 
     @servers.subcommand("retest", aliases=["recheck"],
                         help="Re-test one server in the previous results.")
-    @command.argument("server", required=True)
+    @command.argument("server", matches=".+", required=True)
     async def retest(self, evt: MessageEvent, server: str) -> None:
         try:
             cache = self.caches[evt.room_id]
@@ -326,9 +326,9 @@ class ServerCheckerBot(Plugin):
 
     @servers.subcommand("match", help="Show which servers are on a specific version. "
                                       "Operator can be `>`, `<`, `>=`, `<=`, `!=`, `=` or empty.")
-    @command.argument("software", required=True)
+    @command.argument("software", matches=".+", required=True)
     @command.argument("operator", required=False, parser=parse_operator)
-    @command.argument("version", required=True, pass_raw=True)
+    @command.argument("version", matches=".+", required=True, pass_raw=True)
     async def match(self, evt: MessageEvent, software: str, operator: Optional[ComparisonOperator],
                     version: str) -> None:
         try:
