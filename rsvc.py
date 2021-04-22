@@ -361,7 +361,7 @@ class ServerCheckerBot(Plugin):
                     user_list = (f"[{antinotify(users[0])}](https://matrix.to/#/{users[0]}), "
                                  f"[{antinotify(users[1])}](https://matrix.to/#/{users[1]}) and "
                                  f"{len(users) - 2} others")
-                matches.append(f"* {server_name} with {user_list}")
+                matches.append(f"* {server_name} ({info}) with {user_list}")
         if not matches:
             await evt.reply("No matches :(")
         else:
