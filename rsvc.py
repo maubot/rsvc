@@ -342,7 +342,11 @@ class ServerCheckerBot(Plugin):
             return
         if not operator:
             operator = op.eq
-        want_info = ServerInfo.parse(software, version)
+        try:
+            want_info = ServerInfo.parse(software, version)
+        except ValueError as e:
+            await evt.reply(str(e))
+            return
         matches = []
 
         def antinotify(text: str) -> str:
