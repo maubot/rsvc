@@ -46,6 +46,8 @@ minimum_version = {
         "4": packaging.version.parse("0.99.5rc1"),
         "5": packaging.version.parse("1.0.0rc1"),
         "6": packaging.version.parse("1.14.0rc1"),
+        "7": packaging.version.parse("1.37.0rc1"),
+        "8": packaging.version.parse("1.40.0rc3"),
     },
     "construct": {
         "1": True,
@@ -54,6 +56,8 @@ minimum_version = {
         "4": True,
         "5": True,
         "6": False,
+        "7": False,
+        "8": False,
     },
     "Dendrite": {
         "1": True,
@@ -62,6 +66,18 @@ minimum_version = {
         "4": True,
         "5": True,
         "6": True,
+        "7": False,
+        "8": False,
+    },
+    "Conduit": {
+        "1": False,
+        "2": False,
+        "3": False,
+        "4": False,
+        "5": False,
+        "6": True,
+        "7": False,
+        "8": False,
     },
 }
 
