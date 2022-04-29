@@ -352,7 +352,7 @@ class ServerCheckerBot(Plugin):
                                       "Operator can be `>`, `<`, `>=`, `<=`, `!=`, `=` or empty.")
     @command.argument("software", matches=".+", required=True)
     @command.argument("operator", required=False, parser=parse_operator)
-    @command.argument("version", matches=".+", required=True, pass_raw=True)
+    @command.argument("version", matches=".+", required=False, pass_raw=True)
     async def match(self, evt: MessageEvent, software: str, operator: Optional[ComparisonOperator],
                     version: str) -> None:
         try:
@@ -362,11 +362,15 @@ class ServerCheckerBot(Plugin):
             return
         if not operator:
             operator = op.eq
-        try:
-            want_info = ServerInfo.parse(software, version)
-        except ValueError as e:
-            await evt.reply(str(e))
-            return
+        if not version:
+            operator = lambda a, b: True
+            want_info = ServerInfo(software=software, version=None)
+        else:
+            try:
+                want_info = ServerInfo.parse(software, version)
+            except ValueError as e:
+                await evt.reply(str(e))
+                return
         matches = []
 
         def antinotify(text: str) -> str:
