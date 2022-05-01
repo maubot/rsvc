@@ -302,6 +302,7 @@ class ServerCheckerBot(Plugin):
         if server not in cache.servers:
             await evt.reply("That server isn't in the previous results. If the server joined "
                             "recently, you must retest the whole room.")
+            return
         try:
             prev_version = cache.versions.pop(server)
             prev_error = None
