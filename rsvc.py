@@ -297,7 +297,7 @@ class ServerCheckerBot(Plugin):
             f"* {server} ({members(server)}): {error}" for server, error in results.errors.items()
         )
         errors_str = (
-            f"<details><summary>{len(results.errors)} servers failed</summary>"
+            f"<details><summary>{_pluralize(len(results.errors), 'server')} failed</summary>"
             f"\n\n{errors_str}\n\n</details>"
         )
         if not results.errors:
@@ -515,17 +515,19 @@ class ServerCheckerBot(Plugin):
         else:
             parts.append("Nobody is up to date 😿")
         if unknown_servers:
+            are = "are" if unknown_users > 1 else "is"
             parts.append(
                 f"{_pluralize(unknown_users, 'user')} on "
-                f"{_pluralize(unknown_servers, 'server')} are using unknown software "
+                f"{_pluralize(unknown_servers, 'server')} {are} using unknown software "
                 f"or have faked their server's user agent"
             )
         if outdated_matches:
             outdateds = "\n".join(outdated_matches)
+            are = "are" if outdated_users > 1 else "is"
             parts.append(
                 "<details><summary>"
                 f"{_pluralize(outdated_users, 'user')} on "
-                f"{_pluralize(outdated_servers, 'servers')} are outdated"
+                f"{_pluralize(outdated_servers, 'servers')} {are} outdated"
                 f"</summary>\n\n{outdateds}\n\n</details>"
             )
         else:
@@ -582,6 +584,7 @@ class ServerCheckerBot(Plugin):
             await evt.reply("No matches :(")
         else:
             await evt.reply(
-                f"Matched {matched_users} users on {matched_servers}\n\n" + "\n".join(matches),
+                f"Matched {_pluralize(matched_users, 'user')} on "
+                f"{_pluralize(matched_servers, 'server')}\n\n" + "\n".join(matches),
                 allow_html=True,
             )
