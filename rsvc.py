@@ -13,20 +13,23 @@
 #
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
-from typing import Type, Dict, Union, Tuple, NamedTuple, List, Optional, Callable, Any, Set
+from __future__ import annotations
+
+from typing import Any, Callable, NamedTuple, Union
 import asyncio
+import html
 import operator as op
 
 from attr import dataclass
+import attr
 import packaging.version
 import semver
-import attr
 
-from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
-from mautrix.types import TextMessageEventContent, MessageType, Format, EventID, RoomID, UserID
-from mautrix.util import markdown
-from maubot import Plugin, MessageEvent
+from maubot import MessageEvent, Plugin
 from maubot.handlers import command
+from mautrix.types import EventID, Format, MessageType, RoomID, TextMessageEventContent, UserID
+from mautrix.util import markdown
+from mautrix.util.config import BaseProxyConfig, ConfigUpdateHelper
 
 
 class Config(BaseProxyConfig):
@@ -37,6 +40,14 @@ class Config(BaseProxyConfig):
 class TestError(Exception):
     pass
 
+
+known_room_versions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
+versions_updated = "2022-08-19"
+latest_known_version = {
+    "Synapse": packaging.version.parse("1.65.0"),
+    "Dendrite": semver.parse("0.9.3"),
+    "Conduit": semver.parse("0.4.0"),
+}
 
 minimum_version = {
     "Synapse": {
@@ -49,6 +60,7 @@ minimum_version = {
         "7": packaging.version.parse("1.37.0rc1"),
         "8": packaging.version.parse("1.40.0rc3"),
         "9": packaging.version.parse("1.42.0rc2"),
+        "10": packaging.version.parse("1.64.0rc1"),
     },
     "construct": {
         "1": True,
@@ -56,10 +68,11 @@ minimum_version = {
         "3": True,
         "4": True,
         "5": True,
-        "6": False,
-        "7": False,
-        "8": False,
-        "9": False,
+        "6": True,
+        "7": True,
+        "8": True,
+        "9": True,
+        "10": False,
     },
     "Dendrite": {
         "1": True,
@@ -68,24 +81,38 @@ minimum_version = {
         "4": True,
         "5": True,
         "6": True,
-        "7": False,
-        "8": False,
-        "9": False,
+        "7": semver.parse("0.4.1"),
+        "8": semver.parse("0.8.6"),  # actually added in 0.5.1, but only marked as stable in 0.8.6
+        "9": semver.parse("0.8.6"),
+        "10": semver.parse("0.8.7"),
     },
     "Conduit": {
         "1": False,
         "2": False,
         "3": False,
         "4": False,
-        "5": False,
+        "5": False,  # Conduit's support for room versions below v6 is marked as unstable
         "6": True,
-        "7": False,
-        "8": False,
-        "9": False,
+        "7": semver.parse("0.4.0"),
+        "8": semver.parse("0.4.0"),
+        "9": semver.parse("0.4.0"),
+        "10": False,
+    },
+    "Catalyst": {
+        "1": False,
+        "2": False,
+        "3": False,
+        "4": False,
+        "5": False,  # Same as Conduit
+        "6": True,
+        "7": True,
+        "8": True,
+        "9": True,
+        "10": True,
     },
 }
 
-server_order: Dict[str, int] = {
+server_order: dict[str, int] = {
     "Synapse": 100,
     "construct": 50,
     "Conduit": 40,
@@ -100,13 +127,19 @@ class ServerInfo(NamedTuple):
     version: VersionIdentifier
 
     @classmethod
-    def parse(cls, software: str, version: str) -> 'ServerInfo':
-        if software.lower() == "synapse":
-            return ServerInfo(software="Synapse",
-                              version=packaging.version.parse(version.split(" ")[0]))
-        elif software.lower() == "dendrite":
-            return ServerInfo(software="Dendrite",
-                              version=semver.VersionInfo.parse(version))
+    def parse(cls, software: str, version: str) -> ServerInfo:
+        software_lower = software.lower()
+        if software_lower == "synapse":
+            return ServerInfo(
+                software="Synapse",
+                version=packaging.version.parse(version.split(" ")[0]),
+            )
+        elif software_lower == "dendrite":
+            return ServerInfo(software="Dendrite", version=semver.VersionInfo.parse(version))
+        elif software_lower == "conduit":
+            return ServerInfo(software="Conduit", version=semver.VersionInfo.parse(version))
+        elif software_lower == "catalyst":
+            return ServerInfo(software="Catalyst", version=semver.VersionInfo.parse(version))
         else:
             return ServerInfo(software=software, version=version)
 
@@ -119,10 +152,17 @@ class ServerInfo(NamedTuple):
         else:
             return self.version >= minimum
 
+    @property
+    def is_unknown(self) -> bool:
+        try:
+            return latest_known_version[self.software] < self.version
+        except KeyError:
+            return False
+
     def __str__(self) -> str:
         return f"{self.software} {self.version}"
 
-    def __lt__(self, other: 'ServerInfo') -> bool:
+    def __lt__(self, other: ServerInfo) -> bool:
         if self.software == other.software:
             return self.version < other.version
         else:
@@ -131,10 +171,10 @@ class ServerInfo(NamedTuple):
 
 @dataclass
 class Results:
-    servers: Dict[str, List[UserID]]
-    versions: Dict[str, ServerInfo]
-    errors: Dict[str, str]
-    event_id: Optional[EventID] = None
+    servers: dict[str, list[UserID]]
+    versions: dict[str, ServerInfo]
+    errors: dict[str, str]
+    event_id: EventID | None = None
     lock: asyncio.Lock = attr.ib(factory=lambda: asyncio.Lock())
 
 
@@ -147,7 +187,7 @@ def _pluralize(val: int, word: str) -> str:
 
 ComparisonOperator = Callable[[Any, Any], bool]
 
-op_map: Dict[str, ComparisonOperator] = {
+op_map: dict[str, ComparisonOperator] = {
     "=": op.eq,
     "==": op.eq,
     "===": op.eq,
@@ -166,19 +206,27 @@ def parse_operator(val: str) -> ComparisonOperator:
 
 
 class ServerCheckerBot(Plugin):
-    caches: Dict[RoomID, Results] = {}
-    tests_in_progress: Set[RoomID] = set()
+    caches: dict[RoomID, Results]
+    tests_in_progress: dict[RoomID, asyncio.Task]
 
     async def start(self) -> None:
+        self.caches = {}
+        self.tests_in_progress = {}
         self.on_external_config_update()
 
     @classmethod
-    def get_config_class(cls) -> Type[Config]:
+    def get_config_class(cls) -> type[Config]:
         return Config
 
-    async def _edit(self, room_id: RoomID, event_id: EventID, text: str) -> None:
-        content = TextMessageEventContent(msgtype=MessageType.NOTICE, body=text, format=Format.HTML,
-                                          formatted_body=markdown.render(text))
+    async def _edit(
+        self, room_id: RoomID, event_id: EventID, text: str, allow_html: bool = False
+    ) -> None:
+        content = TextMessageEventContent(
+            msgtype=MessageType.NOTICE,
+            body=text,
+            format=Format.HTML,
+            formatted_body=markdown.render(text, allow_html=allow_html),
+        )
         content.set_edit(event_id)
         await self.client.send_message(room_id, content)
 
@@ -197,17 +245,17 @@ class ServerCheckerBot(Plugin):
             raise TestError("server not responding to version requests")
         return ServerInfo.parse(name, version)
 
-    async def _load_members(self, room_id: RoomID) -> Dict[str, List[UserID]]:
+    async def _load_members(self, room_id: RoomID) -> dict[str, list[UserID]]:
         users = await self.client.get_joined_members(room_id)
-        servers: Dict[str, List[UserID]] = {}
+        servers: dict[str, list[UserID]] = {}
         for user in users:
             _, server = self.client.parse_user_id(user)
             servers.setdefault(server, []).append(user)
         return servers
 
-    async def _test_all(self, servers: Dict[str, List[UserID]]) -> Results:
-        versions: Dict[str, ServerInfo] = {}
-        errors: Dict[str, str] = {}
+    async def _test_all(self, servers: dict[str, list[UserID]]) -> Results:
+        versions: dict[str, ServerInfo] = {}
+        errors: dict[str, str] = {}
 
         async def _test(server_name: str) -> None:
             try:
@@ -224,8 +272,10 @@ class ServerCheckerBot(Plugin):
         return Results(servers, versions, errors)
 
     @staticmethod
-    def _aggregate_versions(results: Results) -> Dict[ServerInfo, Tuple[int, List[UserID]]]:
-        by_version: Dict[ServerInfo, Tuple[int, List[UserID]]] = {}
+    def _aggregate_versions(
+        results: Results,
+    ) -> dict[ServerInfo, tuple[int, list[UserID]]]:
+        by_version: dict[ServerInfo, tuple[int, list[UserID]]] = {}
         for server_name, info in results.versions.items():
             users = results.servers[server_name]
             existing_server_count, existing_users = by_version.get(info, (0, []))
@@ -237,43 +287,77 @@ class ServerCheckerBot(Plugin):
         def members(server_name: str) -> str:
             return _pluralize(len(results.servers[server_name]), "member")
 
-        versions_str = ("### Versions\n\n"
-                        + "\n".join(f"* {_pluralize(server_count, 'server')} "
-                                    f"with {_pluralize(len(users), 'member')} on {info}"
-                                    for info, (server_count, users)
-                                    in cls._aggregate_versions(results).items()))
-        errors_str = ("### Errors\n\n"
-                      + "\n".join(f"* {server} ({members(server)}): {error}"
-                                  for server, error in results.errors.items())
-                      ) if results.errors else ""
-        return "\n\n".join((versions_str, errors_str))
+        versions_str = "\n".join(
+            f"* {_pluralize(server_count, 'server')} "
+            f"with {_pluralize(len(users), 'member')} on {info}"
+            for info, (server_count, users) in cls._aggregate_versions(results).items()
+        )
+        versions_str = f"### Versions\n\n{versions_str}"
+        errors_str = "\n".join(
+            f"* {server} ({members(server)}): {error}" for server, error in results.errors.items()
+        )
+        errors_str = (
+            f"<details><summary>{len(results.errors)} servers failed</summary>"
+            f"\n\n{errors_str}\n\n</details>"
+        )
+        if not results.errors:
+            return versions_str
+        return f"{versions_str}\n\n{errors_str}"
 
-    @command.new("servers", aliases=["versions", "server", "version"], require_subcommand=False,
-                 help="Check the version of all servers in the room.", arg_fallthrough=False)
+    @command.new(
+        "servers",
+        aliases=["versions", "server", "version"],
+        require_subcommand=False,
+        help="Check the version of all servers in the room.",
+        arg_fallthrough=False,
+    )
     async def servers(self, evt: MessageEvent) -> None:
         if evt.room_id in self.tests_in_progress:
             await evt.reply("There is already a test in progress.")
             return
-        self.tests_in_progress.add(evt.room_id)
+        await self.test_or_wait(evt)
+
+    async def test_or_wait(self, evt: MessageEvent) -> None:
+        if evt.room_id in self.tests_in_progress:
+            await self.tests_in_progress[evt.room_id]
+            return
+        self.tests_in_progress[evt.room_id] = task = asyncio.create_task(self._servers(evt))
         try:
-            await self._servers(evt)
+            await task
         finally:
-            self.tests_in_progress.remove(evt.room_id)
+            del self.tests_in_progress[evt.room_id]
+
+    async def cached_or_test(self, evt: MessageEvent) -> Results | None:
+        try:
+            return self.caches[evt.room_id]
+        except KeyError:
+            await self.test_or_wait(evt)
+            try:
+                return self.caches[evt.room_id]
+            except KeyError:
+                await evt.reply("Cache didn't contain test results even after waiting 😿")
+                return None
 
     async def _servers(self, evt: MessageEvent) -> None:
         event_id = await evt.reply("Loading member list...")
         servers = await self._load_members(evt.room_id)
         user_count = sum(len(users) for users in servers.values())
-        await self._edit(evt.room_id, event_id,
-                         f"Member list loaded, found {_pluralize(user_count, 'member')} "
-                         f"on {_pluralize(len(servers), 'server')}. Now running federation tests")
+        await self._edit(
+            evt.room_id,
+            event_id,
+            f"Member list loaded, found {_pluralize(user_count, 'member')} "
+            f"on {_pluralize(len(servers), 'server')}. Now running federation tests",
+        )
         results = await self._test_all(servers)
         results.event_id = event_id
         self.caches[evt.room_id] = results
-        await self._edit(evt.room_id, event_id, self._format_results(results))
+        await self._edit(evt.room_id, event_id, self._format_results(results), allow_html=True)
 
-    @servers.subcommand("test", aliases=["check", "version"],
-                        help="Test one server, independently of any previous whole-room tests.")
+    @servers.subcommand(
+        "test",
+        aliases=["check", "version"],
+        help="Test one server, independently of any previous whole-room tests.",
+    )
     @command.argument("server", matches=".+", required=True)
     async def test(self, evt: MessageEvent, server: str) -> None:
         await evt.mark_read()
@@ -289,19 +373,25 @@ class ServerCheckerBot(Plugin):
         else:
             await evt.reply(f"{server} is on {version}")
 
-    @servers.subcommand("retest", aliases=["recheck"],
-                        help="Re-test one server in the previous results.")
+    @servers.subcommand(
+        "retest",
+        aliases=["recheck"],
+        help="Re-test one server in the previous results.",
+    )
     @command.argument("server", matches=".+", required=True)
     async def retest(self, evt: MessageEvent, server: str) -> None:
         try:
             cache = self.caches[evt.room_id]
         except KeyError:
-            await evt.reply("No cached results. Please use `!servers` to test "
-                            "all servers in the room first.")
+            await evt.reply(
+                "No cached results. Please use `!servers` to test all servers in the room first."
+            )
             return
         if server not in cache.servers:
-            await evt.reply("That server isn't in the previous results. If the server joined "
-                            "recently, you must retest the whole room.")
+            await evt.reply(
+                "That server isn't in the previous results. If the server joined "
+                "recently, you must retest the whole room."
+            )
             return
         try:
             prev_version = cache.versions.pop(server)
@@ -315,12 +405,13 @@ class ServerCheckerBot(Plugin):
                 return
 
         event_id = await evt.reply(f"Re-testing {server}...")
-        new_version: Optional[ServerInfo] = None
-        new_error: Optional[str] = None
+        new_version: ServerInfo | None = None
+        new_error: str | None = None
 
         try:
             cache.versions[server] = new_version = await asyncio.wait_for(
-                self._test(server), timeout=60)
+                self._test(server), timeout=60
+            )
         except TestError as e:
             cache.errors[server] = new_error = str(e)
         except asyncio.TimeoutError:
@@ -330,7 +421,9 @@ class ServerCheckerBot(Plugin):
 
         if new_error != prev_error or new_version != prev_version:
             async with cache.lock:
-                await self._edit(evt.room_id, cache.event_id, self._format_results(cache))
+                await self._edit(
+                    evt.room_id, cache.event_id, self._format_results(cache), allow_html=True
+                )
 
         if new_error is not None:
             cmd_reply_edit = f"Testing {server} failed: {new_error}"
@@ -340,8 +433,10 @@ class ServerCheckerBot(Plugin):
             else:
                 if prev_version.software == new_version.software:
                     action = "update" if prev_version < new_version else "downgrade"
-                    cmd_reply_edit = (f"{server} {action}d {prev_version.software} "
-                                      f"from {prev_version.version} to {new_version.version}")
+                    cmd_reply_edit = (
+                        f"{server} {action}d {prev_version.software} "
+                        f"from {prev_version.version} to {new_version.version}"
+                    )
                 else:
                     cmd_reply_edit = f"{server} switched from {prev_version} to {new_version}"
         else:
@@ -349,17 +444,117 @@ class ServerCheckerBot(Plugin):
 
         await self._edit(evt.room_id, event_id, cmd_reply_edit)
 
-    @servers.subcommand("match", help="Show which servers are on a specific version. "
-                                      "Operator can be `>`, `<`, `>=`, `<=`, `!=`, `=` or empty.")
+    @staticmethod
+    def _antinotify(text: str) -> str:
+        return "\ufeff".join(text)
+
+    @classmethod
+    def _user_link(cls, user_id: UserID) -> str:
+        return (
+            f"[{html.escape(cls._antinotify(user_id))}]"
+            f"(https://matrix.to/#/{html.escape(user_id)})"
+        )
+
+    @classmethod
+    def _make_user_list(cls, server_name: str, info: ServerInfo, users: list[UserID]) -> str:
+        if len(users) == 1:
+            user_list = cls._user_link(users[0])
+        elif len(users) == 2:
+            user_list = f"{cls._user_link(users[0])} and {cls._user_link(users[1])}"
+        elif len(users) == 3:
+            user_list = (
+                f"{cls._user_link(users[0])}, {cls._user_link(users[1])} "
+                f"and {cls._user_link(users[2])}"
+            )
+        else:
+            user_list = f"{cls._user_link(users[0])}, {cls._user_link(users[1])} and {len(users) - 2} others"
+        return f"* {server_name} ({info}) with {user_list}"
+
+    @servers.subcommand(
+        "upgrade",
+        help="Check which servers would be left behind if the room was upgraded",
+    )
+    @command.argument(
+        "room_version", label="stable room version", matches=r"[\d.]+", required=True
+    )
+    async def upgrade(self, evt: MessageEvent, room_version: str) -> None:
+        if room_version not in known_room_versions:
+            await evt.reply(f"Unknown room version {room_version}")
+            return
+        cache = await self.cached_or_test(evt)
+        if not cache:
+            return
+
+        up_to_date_servers = 0
+        up_to_date_users = 0
+        outdated_servers = 0
+        outdated_users = 0
+        unknown_servers = 0
+        unknown_users = 0
+        outdated_matches = []
+        may_contain_new_software = False
+        for server_name, info in cache.versions.items():
+            users = cache.servers[server_name]
+            if info.software not in minimum_version:
+                unknown_servers += 1
+                unknown_users += len(users)
+            elif info.is_new_enough(room_version):
+                up_to_date_servers += 1
+                up_to_date_users += len(users)
+            else:
+                may_contain_new_software = may_contain_new_software or info.is_unknown
+                outdated_servers += 1
+                outdated_users += len(users)
+                outdated_matches.append(self._make_user_list(server_name, info, users))
+        parts = []
+        if up_to_date_servers:
+            parts.append(
+                f"{_pluralize(up_to_date_users, 'user')} on "
+                f"{_pluralize(up_to_date_servers, 'server')} are up to date"
+            )
+        else:
+            parts.append("Nobody is up to date 😿")
+        if unknown_servers:
+            parts.append(
+                f"{_pluralize(unknown_users, 'user')} on "
+                f"{_pluralize(unknown_servers, 'server')} are using unknown software "
+                f"or have faked their server's user agent"
+            )
+        if outdated_matches:
+            outdateds = "\n".join(outdated_matches)
+            parts.append(
+                "<details><summary>"
+                f"{_pluralize(outdated_users, 'user')} on "
+                f"{_pluralize(outdated_servers, 'servers')} are outdated"
+                f"</summary>\n\n{outdateds}\n\n</details>"
+            )
+        else:
+            parts.append("Nobody is outdated 🎉")
+        if may_contain_new_software:
+            parts.append(
+                f"<sub>Room version support table last updated on {versions_updated}</sub>"
+            )
+        await evt.reply("\n\n".join(parts), allow_html=True)
+
+    @servers.subcommand(
+        "match",
+        help=(
+            "Show which servers are on a specific version. "
+            "Operator can be `>`, `<`, `>=`, `<=`, `!=`, `=` or empty."
+        ),
+    )
     @command.argument("software", matches=".+", required=True)
     @command.argument("operator", required=False, parser=parse_operator)
     @command.argument("version", matches=".+", required=False, pass_raw=True)
-    async def match(self, evt: MessageEvent, software: str, operator: Optional[ComparisonOperator],
-                    version: str) -> None:
-        try:
-            cache = self.caches[evt.room_id]
-        except KeyError:
-            await evt.reply("No results cached. Use `!servers` to test servers first.")
+    async def match(
+        self,
+        evt: MessageEvent,
+        software: str,
+        operator: ComparisonOperator | None,
+        version: str,
+    ) -> None:
+        cache = await self.cached_or_test(evt)
+        if not cache:
             return
         if not operator:
             operator = op.eq
@@ -373,25 +568,20 @@ class ServerCheckerBot(Plugin):
                 await evt.reply(str(e))
                 return
         matches = []
-
-        def antinotify(text: str) -> str:
-            return "\ufeff".join(text)
-
+        matched_users = 0
+        matched_servers = 0
         for server_name, info in cache.versions.items():
-            if ((info.software.lower() == want_info.software.lower()
-                 and operator(info.version, want_info.version))):
+            if info.software.lower() == want_info.software.lower() and operator(
+                info.version, want_info.version
+            ):
                 users = cache.servers[server_name]
-                if len(users) == 1:
-                    user_list = f"[{antinotify(users[0])}](https://matrix.to/#/{users[0]})"
-                elif len(users) == 2:
-                    user_list = (f"[{antinotify(users[0])}](https://matrix.to/#/{users[0]}) and "
-                                 f"[{antinotify(users[1])}](https://matrix.to/#/{users[1]})")
-                else:
-                    user_list = (f"[{antinotify(users[0])}](https://matrix.to/#/{users[0]}), "
-                                 f"[{antinotify(users[1])}](https://matrix.to/#/{users[1]}) and "
-                                 f"{len(users) - 2} others")
-                matches.append(f"* {server_name} ({info}) with {user_list}")
+                matched_users += len(users)
+                matched_servers += 1
+                matches.append(self._make_user_list(server_name, info, users))
         if not matches:
             await evt.reply("No matches :(")
         else:
-            await evt.reply("\n".join(matches))
+            await evt.reply(
+                f"Matched {matched_users} users on {matched_servers}\n\n" + "\n".join(matches),
+                allow_html=True,
+            )
