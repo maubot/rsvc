@@ -638,7 +638,7 @@ class ServerCheckerBot(Plugin):
             parts.append(
                 "<details><summary>"
                 f"{_pluralize(outdated_users, 'user')} on "
-                f"{_pluralize(outdated_servers, 'servers')} {are} outdated"
+                f"{_pluralize(outdated_servers, 'server')} {are} outdated"
                 f"</summary>\n\n{outdateds}\n\n</details>"
             )
         else:
