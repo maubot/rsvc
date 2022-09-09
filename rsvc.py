@@ -230,13 +230,124 @@ class ServerCheckerBot(Plugin):
         content.set_edit(event_id)
         await self.client.send_message(room_id, content)
 
+    @staticmethod
+    def _parse_error(server: str, result: dict) -> str:
+        ipv4_failures = 0
+        ipv6_failures = 0
+        ipv4_connections = 0
+        ipv6_connections = 0
+        ipv4_successes = 0
+        ipv6_successes = 0
+        errors = set()
+        errors_with_addr = []
+        failed_addresses = 0
+        addr: str
+        for addr, error in result.get("ConnectionErrors", {}).items():
+            if addr.startswith("[") or addr.count(":") > 1:
+                ipv6_failures += 1
+            else:
+                ipv4_failures += 1
+        for addr, data in result.get("ConnectionReports", {}).items():
+            if addr.startswith("[") or addr.count(":") > 1:
+                ipv6_connections += 1
+            else:
+                ipv4_connections += 1
+
+            def add_err(error: str) -> None:
+                nonlocal failed_addresses
+                failed_addresses += 1
+                if error not in errors:
+                    errors.add(error)
+                    # if addr.startswith("[") or addr.count(":") > 1:
+                    #     ipv6_errors.append((addr, error))
+                    # else:
+                    errors_with_addr.append((addr, error))
+
+            checks = data.get("Checks") or {}
+            if not checks.get("MatchingServerName"):
+                got_server = (data.get("Keys") or {}).get("server_name", "undefined")
+                add_err(f"mismatching server name, tested: {server}, got: {got_server}")
+            elif not checks.get("ValidCertificates"):
+                add_err("invalid TLS certificates")
+            elif not checks.get("AllChecksOK"):
+                add_err("some checks failed")
+            else:
+                if addr.startswith("[") or addr.count(":") > 1:
+                    ipv6_successes += 1
+                else:
+                    ipv4_successes += 1
+        total_ipv4 = ipv4_failures + ipv4_connections
+        total_ipv6 = ipv6_failures + ipv6_connections
+        msgs = []
+        if ipv4_failures + ipv6_failures == total_ipv4 + total_ipv6:
+            if total_ipv4 + total_ipv6 == 1:
+                msgs.append("Server couldn't be reached")
+            else:
+                msgs.append("Server couldn't be reached on any address")
+        else:
+            if ipv4_failures:
+                prefix = (
+                    f"{ipv4_failures}/{total_ipv4} IPv4 addresses"
+                    if total_ipv4 > 1
+                    else "IPv4 address"
+                )
+                msgs.append(f"{prefix} couldn't be reached")
+            if ipv6_failures:
+                prefix = (
+                    f"{ipv6_failures}/{total_ipv6} IPv6 addresses"
+                    if total_ipv6 > 1
+                    else "IPv6 address"
+                )
+                msgs.append(f"{prefix} couldn't be reached")
+        if errors_with_addr:
+            es = "es" if failed_addresses > 1 else ""
+            if len(errors_with_addr) == 1:
+                _, errors_msg = errors_with_addr[0]
+            else:
+                errors_msg = ", ".join(f"{addr}: {msg}" for addr, msg in errors_with_addr)
+            msgs.append(
+                f"{failed_addresses}/{total_ipv4+total_ipv6} address{es} failed the test: "
+                f"{errors_msg}"
+            )
+        suffix = ""
+        if ipv4_successes:
+            if total_ipv4 == 1:
+                suffix = "IPv4 is OK"
+            else:
+                suffix = f"{ipv4_successes}/{total_ipv4} IPv4 addresses are OK"
+        if ipv6_successes:
+            if total_ipv6 == 1:
+                msg = "IPv6 is OK"
+            else:
+                msg = f"{ipv6_successes}/{total_ipv6} IPv6 addresses are OK"
+            if suffix:
+                suffix = f"{suffix} and {msg}"
+            else:
+                suffix = msg
+        if suffix:
+            suffix = f" ({suffix})"
+        if len(msgs) > 1:
+            return f"{', '.join(msgs[0:-1])} and {msgs[-1]}" + suffix
+        elif len(msgs) == 1:
+            return msgs[0] + suffix
+        elif total_ipv4 + total_ipv6 == 0:
+            return "No server addresses found"
+        else:
+            return "federation not OK (unknown error)"
+
     async def _test(self, server: str) -> ServerInfo:
         self.log.debug(f"Testing {server}")
         resp = await self.http.get(self.config["federation_tester"].format(server=server))
         result = await resp.json()
 
         if not result["FederationOK"]:
-            raise TestError("federation not OK")
+            error_msg = self._parse_error(server, result)
+            name = (result.get("Version") or {}).get("name", "")
+            version = (result.get("Version") or {}).get("version", "")
+            if name and version:
+                server_info = ServerInfo.parse(name, version)
+                raise TestError(f"{error_msg} // {server_info}")
+            raise TestError(error_msg)
 
         try:
             name = result["Version"]["name"]
