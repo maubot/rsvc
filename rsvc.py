@@ -305,10 +305,13 @@ class ServerCheckerBot(Plugin):
                 _, errors_msg = errors_with_addr[0]
             else:
                 errors_msg = ", ".join(f"{addr}: {msg}" for addr, msg in errors_with_addr)
-            msgs.append(
-                f"{failed_addresses}/{total_ipv4+total_ipv6} address{es} failed the test: "
-                f"{errors_msg}"
-            )
+            if total_ipv4 + total_ipv6 == 1 == failed_addresses:
+                msgs.append(errors_msg)
+            else:
+                msgs.append(
+                    f"{failed_addresses}/{total_ipv4+total_ipv6} address{es} failed the test: "
+                    f"{errors_msg}"
+                )
         suffix = ""
         if ipv4_successes:
             if total_ipv4 == 1:
