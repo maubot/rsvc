@@ -114,9 +114,10 @@ minimum_version = {
 
 server_order: dict[str, int] = {
     "Synapse": 100,
-    "construct": 50,
+    "Dendrite": 50,
+    "Catalyst": 45,
     "Conduit": 40,
-    "Dendrite": 10,
+    "construct": 10,
 }
 
 VersionIdentifier = Union[str, packaging.version.Version, semver.VersionInfo]
