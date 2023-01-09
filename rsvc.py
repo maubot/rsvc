@@ -42,11 +42,11 @@ class TestError(Exception):
 
 
 known_room_versions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
-versions_updated = "2022-08-19"
+versions_updated = "2023-01-09"
 latest_known_version = {
-    "Synapse": packaging.version.parse("1.65.0"),
-    "Dendrite": semver.parse("0.9.3"),
-    "Conduit": semver.parse("0.4.0"),
+    "Synapse": packaging.version.parse("1.74.0"),
+    "Dendrite": semver.parse("0.10.8"),
+    "Conduit": semver.parse("0.5.0"),
 }
 
 minimum_version = {
@@ -96,7 +96,7 @@ minimum_version = {
         "7": semver.parse("0.4.0"),
         "8": semver.parse("0.4.0"),
         "9": semver.parse("0.4.0"),
-        "10": False,
+        "10": semver.parse("0.5.0"),
     },
     "Catalyst": {
         "1": False,
