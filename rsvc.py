@@ -220,8 +220,15 @@ class ServerCheckerBot(Plugin):
         return Config
 
     async def _edit(
-        self, room_id: RoomID, event_id: EventID, text: str, allow_html: bool = False
+        self,
+        room_id: RoomID,
+        event_id: EventID,
+        text: str,
+        results: Results | None = None,
+        allow_html: bool = False,
     ) -> None:
+        if results:
+            text = self._format_results(results)
         content = TextMessageEventContent(
             msgtype=MessageType.NOTICE,
             body=text,
@@ -229,6 +236,12 @@ class ServerCheckerBot(Plugin):
             formatted_body=markdown.render(text, allow_html=allow_html),
         )
         content.set_edit(event_id)
+        if len(content.json()) > 60_000:
+            content.body = "Plaintext version omitted due to large response size"
+            if len(content.json()) > 60_000 and results:
+                content.formatted_body = markdown.render(
+                    self._format_results(results, compact=True), allow_html=True
+                )
         await self.client.send_message(room_id, content)
 
     @staticmethod
@@ -398,7 +411,7 @@ class ServerCheckerBot(Plugin):
         return dict(sorted(by_version.items(), reverse=True))
 
     @classmethod
-    def _format_results(cls, results: Results) -> str:
+    def _format_results(cls, results: Results, compact: bool = False) -> str:
         def members(server_name: str) -> str:
             return _pluralize(len(results.servers[server_name]), "member")
 
@@ -408,15 +421,19 @@ class ServerCheckerBot(Plugin):
             for info, (server_count, users) in cls._aggregate_versions(results).items()
         )
         versions_str = f"### Versions\n\n{versions_str}"
-        errors_str = "\n".join(
-            f"* {server} ({members(server)}): {error}" for server, error in results.errors.items()
-        )
-        errors_str = (
-            f"<details><summary>{_pluralize(len(results.errors), 'server')} failed</summary>"
-            f"\n\n{errors_str}\n\n</details>"
-        )
         if not results.errors:
             return versions_str
+        if compact:
+            errors_str = f"{_pluralize(len(results.errors), 'server')} failed (full list omitted due to large size)"
+        else:
+            errors_str = "\n".join(
+                f"* {server} ({members(server)}): {error}"
+                for server, error in results.errors.items()
+            )
+            errors_str = (
+                f"<details><summary>{_pluralize(len(results.errors), 'server')} failed</summary>"
+                f"\n\n{errors_str}\n\n</details>"
+            )
         return f"{versions_str}\n\n{errors_str}"
 
     @command.new(
@@ -466,7 +483,9 @@ class ServerCheckerBot(Plugin):
         results = await self._test_all(servers)
         results.event_id = event_id
         self.caches[evt.room_id] = results
-        await self._edit(evt.room_id, event_id, self._format_results(results), allow_html=True)
+        await self._edit(
+            evt.room_id, event_id, self._format_results(results), results=results, allow_html=True
+        )
 
     @servers.subcommand(
         "test",
@@ -537,7 +556,11 @@ class ServerCheckerBot(Plugin):
         if new_error != prev_error or new_version != prev_version:
             async with cache.lock:
                 await self._edit(
-                    evt.room_id, cache.event_id, self._format_results(cache), allow_html=True
+                    evt.room_id,
+                    cache.event_id,
+                    self._format_results(cache),
+                    results=cache,
+                    allow_html=True,
                 )
 
         if new_error is not None:
