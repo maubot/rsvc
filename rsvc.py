@@ -41,11 +41,11 @@ class TestError(Exception):
     pass
 
 
-known_room_versions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
-versions_updated = "2023-01-09"
+known_room_versions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}
+versions_updated = "2023-07-24"
 latest_known_version = {
-    "Synapse": packaging.version.parse("1.74.0"),
-    "Dendrite": semver.parse("0.10.8"),
+    "Synapse": packaging.version.parse("1.88.0"),
+    "Dendrite": semver.parse("0.13.1"),
     "Conduit": semver.parse("0.5.0"),
 }
 
@@ -61,6 +61,7 @@ minimum_version = {
         "8": packaging.version.parse("1.40.0rc3"),
         "9": packaging.version.parse("1.42.0rc2"),
         "10": packaging.version.parse("1.64.0rc1"),
+        "11": False,  # packaging.version.parse("1.89.0rc1"),
     },
     "construct": {
         "1": True,
@@ -73,6 +74,7 @@ minimum_version = {
         "8": True,
         "9": True,
         "10": False,
+        "11": False,
     },
     "Dendrite": {
         "1": True,
@@ -85,6 +87,7 @@ minimum_version = {
         "8": semver.parse("0.8.6"),  # actually added in 0.5.1, but only marked as stable in 0.8.6
         "9": semver.parse("0.8.6"),
         "10": semver.parse("0.8.7"),
+        "11": False,
     },
     "Conduit": {
         "1": False,
@@ -97,6 +100,7 @@ minimum_version = {
         "8": semver.parse("0.4.0"),
         "9": semver.parse("0.4.0"),
         "10": semver.parse("0.5.0"),
+        "11": False,  # semver.parse("0.6.0"),
     },
     "Catalyst": {
         "1": False,
@@ -109,6 +113,7 @@ minimum_version = {
         "8": True,
         "9": True,
         "10": True,
+        "11": False,
     },
 }
 
