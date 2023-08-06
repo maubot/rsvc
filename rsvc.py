@@ -42,9 +42,9 @@ class TestError(Exception):
 
 
 known_room_versions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}
-versions_updated = "2023-07-24"
+versions_updated = "2023-08-07"
 latest_known_version = {
-    "Synapse": packaging.version.parse("1.88.0"),
+    "Synapse": packaging.version.parse("1.89.0"),
     "Dendrite": semver.parse("0.13.1"),
     "Conduit": semver.parse("0.5.0"),
 }
@@ -61,7 +61,7 @@ minimum_version = {
         "8": packaging.version.parse("1.40.0rc3"),
         "9": packaging.version.parse("1.42.0rc2"),
         "10": packaging.version.parse("1.64.0rc1"),
-        "11": False,  # packaging.version.parse("1.89.0rc1"),
+        "11": packaging.version.parse("1.89.0rc1"),
     },
     "construct": {
         "1": True,
