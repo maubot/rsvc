@@ -87,7 +87,7 @@ minimum_version = {
         "8": semver.parse("0.8.6"),  # actually added in 0.5.1, but only marked as stable in 0.8.6
         "9": semver.parse("0.8.6"),
         "10": semver.parse("0.8.7"),
-        "11": False,
+        "11": semver.parse("0.13.3"),
     },
     "Conduit": {
         "1": False,
