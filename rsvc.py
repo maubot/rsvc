@@ -42,7 +42,7 @@ class TestError(Exception):
 
 
 known_room_versions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}
-versions_updated = "2023-08-07"
+versions_updated = "2023-09-30"
 latest_known_version = {
     "Synapse": packaging.version.parse("1.89.0"),
     "Dendrite": semver.parse("0.13.1"),
