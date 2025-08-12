@@ -41,12 +41,13 @@ class TestError(Exception):
     pass
 
 
-known_room_versions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"}
-versions_updated = "2023-09-30"
+known_room_versions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"}
+versions_updated = "2025-08-11"
 latest_known_version = {
-    "Synapse": packaging.version.parse("1.93.0"),
-    "Dendrite": semver.parse("0.13.3"),
-    "Conduit": semver.parse("0.6.0"),
+    "Synapse": packaging.version.parse("1.136.0rc2"),
+    "Dendrite": semver.parse("0.14.1"),
+    "Conduit": semver.parse("0.10.8"),
+    "continuwuity": semver.parse("0.5.0-rc.7"),
 }
 
 minimum_version = {
@@ -62,6 +63,7 @@ minimum_version = {
         "9": packaging.version.parse("1.42.0rc2"),
         "10": packaging.version.parse("1.64.0rc1"),
         "11": packaging.version.parse("1.89.0rc1"),
+        "12": packaging.version.parse("1.135.1"),
     },
     "construct": {
         "1": True,
@@ -75,6 +77,7 @@ minimum_version = {
         "9": True,
         "10": False,
         "11": False,
+        "12": False,
     },
     "Dendrite": {
         "1": True,
@@ -88,6 +91,7 @@ minimum_version = {
         "9": semver.parse("0.8.6"),
         "10": semver.parse("0.8.7"),
         "11": semver.parse("0.13.3"),
+        "12": semver.parse("0.15.0"),
     },
     "Conduit": {
         "1": False,
@@ -100,7 +104,8 @@ minimum_version = {
         "8": semver.parse("0.4.0"),
         "9": semver.parse("0.4.0"),
         "10": semver.parse("0.5.0"),
-        "11": False,  # semver.parse("0.6.0"),
+        "11": semver.parse("0.7.0"),
+        "12": semver.parse("0.10.8"),
     },
     "Catalyst": {
         "1": False,
@@ -115,13 +120,28 @@ minimum_version = {
         "10": True,
         "11": False,
     },
+    "continuwuity": {
+        "1": False,
+        "2": False,
+        "3": False,
+        "4": False,
+        "5": False,
+        "6": True,
+        "7": True,
+        "8": True,
+        "9": True,
+        "10": True,
+        "11": True,
+        "12": semver.parse("0.5.0-rc.8"),
+    },
 }
 
 server_order: dict[str, int] = {
     "Synapse": 100,
     "Dendrite": 50,
-    "Catalyst": 45,
+    "continuwuity": 46,
     "Conduit": 40,
+    "Catalyst": 10,
     "construct": 10,
 }
 
@@ -144,6 +164,8 @@ class ServerInfo(NamedTuple):
             return ServerInfo(software="Dendrite", version=semver.VersionInfo.parse(version))
         elif software_lower == "conduit":
             return ServerInfo(software="Conduit", version=semver.VersionInfo.parse(version))
+        elif software_lower == "continuwuity":
+            return ServerInfo(software="continuwuity", version=semver.VersionInfo.parse(version.split(" ")[0]))
         elif software_lower == "catalyst":
             return ServerInfo(software="Catalyst", version=semver.VersionInfo.parse(version))
         else:
@@ -398,6 +420,7 @@ class ServerCheckerBot(Plugin):
             except asyncio.TimeoutError:
                 errors[server_name] = "test timed out"
             except Exception:
+                self.log.exception(f"Unknown error testing {server_name}")
                 errors[server_name] = "internal plugin error"
 
         await asyncio.gather(*[_test(server) for server in servers.keys()])
