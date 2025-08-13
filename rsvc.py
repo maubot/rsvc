@@ -42,10 +42,10 @@ class TestError(Exception):
 
 
 known_room_versions = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"}
-versions_updated = "2025-08-11"
+versions_updated = "2025-08-13"
 latest_known_version = {
-    "Synapse": packaging.version.parse("1.136.0rc2"),
-    "Dendrite": semver.parse("0.14.1"),
+    "Synapse": packaging.version.parse("1.136.0"),
+    "Dendrite": semver.parse("0.15.1"),
     "Conduit": semver.parse("0.10.8"),
     "continuwuity": semver.parse("0.5.0-rc.7"),
 }
